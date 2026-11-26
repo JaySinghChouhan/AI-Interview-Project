@@ -26,8 +26,10 @@ npm --prefix server install
 ### Environment
 
 Copy `server/.env.example` to `server/.env` and `client/.env.example` to `client/.env`.
-Set `MONGODB_URI` in `server/.env` to a MongoDB database you can access; it is
-required for registration and login. Set `OPENROUTER_API_KEY` to enable live AI
+Set `MONGODB_URI` in `server/.env` to a MongoDB cluster you can access; it is
+required for registration and login. The server stores authentication data in
+the `InterviewDatabase` database, regardless of the database name in the URI.
+Set `OPENROUTER_API_KEY` to enable live AI
 questions and feedback. You may also set `OPENROUTER_MODEL` to a model available
 to your OpenRouter account. Do not commit real credentials.
 
@@ -57,6 +59,8 @@ Configure these Vercel environment variables as needed:
 The frontend and API use the same origin, so no service binding is required. Do
 not add secrets to the repository or client-side environment. Configure the
 MongoDB Atlas network access rules to allow the Vercel deployment to connect.
+The API selects the `InterviewDatabase` database within the cluster for its
+`users` and `sessions` collections.
 
 Authentication endpoints:
 

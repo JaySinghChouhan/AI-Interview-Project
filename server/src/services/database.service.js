@@ -13,6 +13,7 @@ export async function connectToDatabase() {
 
   if (!connectionPromise) {
     connectionPromise = mongoose.connect(env.mongodbUri, {
+      dbName: env.mongodbDatabaseName,
       serverSelectionTimeoutMS: 5000,
     }).then(() => undefined).catch((cause) => {
       connectionPromise = undefined;

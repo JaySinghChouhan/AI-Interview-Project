@@ -1,6 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import mongoose from 'mongoose';
 import { createApp } from '../src/app.js';
+import { env } from '../src/config/env.js';
+import { connectToDatabase } from '../src/services/database.service.js';
+
+test('database connections target InterviewDatabase', async () => {
+  const originalUri = env.mongodbUri;
+  const originalConnect = mongoose.connect;
+  let connectionOptions;
+  env.mongodbUri = 'mongodb://127.0.0.1:27017/test';
+  mongoose.connect = async (_uri, options) => {
+    connectionOptions = options;
+    return mongoose;
+  };
+
+  try {
+    await connectToDatabase();
+    assert.equal(connectionOptions.dbName, 'InterviewDatabase');
+  } finally {
+    mongoose.connect = originalConnect;
+    env.mongodbUri = originalUri;
+  }
+});
 
 async function startServer(app = createApp()) {
   const server = app.listen(0);

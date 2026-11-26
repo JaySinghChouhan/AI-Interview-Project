@@ -1,11 +1,11 @@
 import 'dotenv/config';
-import mongoose from 'mongoose';
 import app from './app.js';
 import { env } from './config/env.js';
+import { connectToDatabase } from './services/database.service.js';
 
 async function start() {
   if (env.mongodbUri) {
-    await mongoose.connect(env.mongodbUri);
+    await connectToDatabase();
   }
 
   app.listen(env.port, () => {
