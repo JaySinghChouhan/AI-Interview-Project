@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { createApp } from './app.js';
+import app from './app.js';
 import { env } from './config/env.js';
 
 async function start() {
@@ -8,7 +8,6 @@ async function start() {
     await mongoose.connect(env.mongodbUri);
   }
 
-  const app = createApp();
   app.listen(env.port, () => {
     console.log(`API listening on http://localhost:${env.port}`);
   });
