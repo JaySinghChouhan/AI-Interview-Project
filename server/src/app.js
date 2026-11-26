@@ -14,6 +14,7 @@ import { errorHandler } from './middleware/error.middleware.js';
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  if (process.env.VERCEL === '1') app.set('trust proxy', 1);
   app.use(helmet());
   app.use(compression());
   app.use(express.json({ limit: '1mb' }));

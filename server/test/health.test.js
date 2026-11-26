@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 
-async function startServer() {
-  const server = createApp().listen(0);
+async function startServer(app = createApp()) {
+  const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const address = server.address();
   return {
@@ -46,6 +46,37 @@ test('account and AI routes do not allow unauthenticated access', async () => {
 
     assert.equal(accountResponse.status, 401);
     assert.equal(aiResponse.status, 401);
+  } finally {
+    await server.close();
+  }
+});
+
+test('authentication rate limiting distinguishes Vercel forwarded client IPs', async () => {
+  const previousVercelValue = process.env.VERCEL;
+  process.env.VERCEL = '1';
+  const app = createApp();
+  if (previousVercelValue === undefined) delete process.env.VERCEL;
+  else process.env.VERCEL = previousVercelValue;
+  const server = await startServer(app);
+
+  async function loginFrom(ip) {
+    return fetch(`${server.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': ip,
+      },
+      body: JSON.stringify({ email: 'invalid', password: 'short' }),
+    });
+  }
+
+  try {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      assert.equal((await loginFrom('198.51.100.10')).status, 400);
+    }
+
+    assert.equal((await loginFrom('203.0.113.20')).status, 400);
+    assert.equal((await loginFrom('198.51.100.10')).status, 429);
   } finally {
     await server.close();
   }
