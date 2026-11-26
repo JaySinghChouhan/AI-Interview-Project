@@ -8,11 +8,12 @@ MERN MVP for an AI-powered text interview platform.
 - PDF and TXT resume upload with browser-side text extraction
 - AI-generated interview questions and feedback through OpenRouter
 - Interview timer, answer capture, offline practice preview, and downloadable report
-- Local interview history and progress summary (stored in this browser)
+- Email/password registration and login backed by MongoDB, with protected dashboard and AI API
+- Per-account interview history and progress summary stored in this browser
 
 Without an OpenRouter key, the app clearly switches to sample questions and an
-offline practice estimate. Authentication, cloud persistence, and payments are
-not connected yet.
+offline practice estimate. Interview history is kept in browser storage, separately
+for each account; it is not synchronized to the server.
 
 ### Install
 
@@ -25,9 +26,10 @@ npm --prefix server install
 ### Environment
 
 Copy `server/.env.example` to `server/.env` and `client/.env.example` to `client/.env`.
-Set `OPENROUTER_API_KEY` in `server/.env` to enable live AI questions and feedback.
-You may also set `OPENROUTER_MODEL` to a model available to your OpenRouter account.
-Do not commit real credentials.
+Set `MONGODB_URI` in `server/.env` to a MongoDB database you can access; it is
+required for registration and login. Set `OPENROUTER_API_KEY` to enable live AI
+questions and feedback. You may also set `OPENROUTER_MODEL` to a model available
+to your OpenRouter account. Do not commit real credentials.
 
 ### Run
 
@@ -47,15 +49,23 @@ domain.
 
 Configure these Vercel environment variables as needed:
 
+- `MONGODB_URI` — required for registration, login, and authenticated AI requests
 - `OPENROUTER_API_KEY` — required for live AI-generated interviews
 - `OPENROUTER_MODEL` — optional model override
 - `CLIENT_URL` — optional comma-separated list of additional allowed browser origins
-- `MONGODB_URI` — optional MongoDB connection string when database-backed features are added
 
 The frontend and API use the same origin, so no service binding is required. Do
-not add secrets to the repository or client-side environment.
+not add secrets to the repository or client-side environment. Configure the
+MongoDB Atlas network access rules to allow the Vercel deployment to connect.
 
-AI endpoints:
+Authentication endpoints:
+
+- `POST /api/auth/register` — create an account and sign in
+- `POST /api/auth/login` — sign in
+- `GET /api/auth/me` — read the signed-in user
+- `POST /api/auth/logout` — revoke the current session
+
+Protected AI endpoints:
 
 - `POST /api/ai/questions` — generate role-specific interview questions
 - `POST /api/ai/evaluate` — evaluate a completed set of answers

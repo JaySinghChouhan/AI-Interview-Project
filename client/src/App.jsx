@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import './App.css';
+import AuthScreen from './AuthScreen.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 const STORAGE_KEY = 'interview-agent-history';
@@ -46,9 +47,10 @@ function Icon({ name, size = 18 }) {
   );
 }
 
-function readHistory() {
+function readHistory(userId) {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    const saved = JSON.parse(localStorage.getItem(`${STORAGE_KEY}:${userId}`) || '[]');
+    return Array.isArray(saved) ? saved : [];
   } catch (error) {
     console.warn('Could not read saved interview history.', error);
     return [];
@@ -79,15 +81,32 @@ async function extractResumeText(file) {
   return pageTexts.join('\n').slice(0, 20000);
 }
 
-async function apiRequest(path, body) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.message || 'The AI request failed.');
+async function requestApi(path, { method = 'GET', body } = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      credentials: 'include',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new Event('auth:expired'));
+    }
+    const error = new Error(payload.message || 'The request failed.');
+    error.status = response.status;
+    throw error;
+  }
   return payload.data;
+}
+
+async function apiRequest(path, body) {
+  return requestApi(path, { method: 'POST', body });
 }
 
 function formatDuration(seconds) {
@@ -98,7 +117,12 @@ function formatDuration(seconds) {
 
 function App() {
   const [page, setPage] = useState('dashboard');
-  const [history, setHistory] = useState(readHistory);
+  const [authUser, setAuthUser] = useState(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [history, setHistory] = useState([]);
+  const [historyUserId, setHistoryUserId] = useState(null);
   const [showSetup, setShowSetup] = useState(false);
   const [role, setRole] = useState(roles[0]);
   const [customRole, setCustomRole] = useState('');
@@ -118,12 +142,83 @@ function App() {
   const activeRole = role === 'Other' ? customRole.trim() : role;
 
   useEffect(() => {
+    let active = true;
+    requestApi('/auth/me')
+      .then((data) => {
+        if (active) {
+          setAuthUser(data.user);
+          setHistory(readHistory(data.user.id));
+          setHistoryUserId(data.user.id);
+        }
+      })
+      .catch((error) => {
+        if (active && error.status !== 401) setAuthError(error.message);
+      })
+      .finally(() => {
+        if (active) setAuthChecking(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    function handleExpiredSession() {
+      setAuthUser(null);
+      setAuthError('Your session expired. Please sign in again.');
+      setHistory([]);
+      setHistoryUserId(null);
+      setSession(null);
+      setShowSetup(false);
+      setPage('dashboard');
+    }
+    window.addEventListener('auth:expired', handleExpiredSession);
+    return () => window.removeEventListener('auth:expired', handleExpiredSession);
+  }, []);
+
+  useEffect(() => {
+    if (!authUser || historyUserId !== authUser.id) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+      localStorage.setItem(`${STORAGE_KEY}:${authUser.id}`, JSON.stringify(history));
     } catch (error) {
       console.warn('Could not save interview history.', error);
     }
-  }, [history]);
+  }, [authUser, history, historyUserId]);
+
+  async function handleAuthSubmit({ mode, name, email, password }) {
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      const data = await requestApi(`/auth/${mode}`, {
+        method: 'POST',
+        body: { name, email, password },
+      });
+      setAuthUser(data.user);
+      setHistory(readHistory(data.user.id));
+      setHistoryUserId(data.user.id);
+      setPage('dashboard');
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleLogout() {
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      await requestApi('/auth/logout', { method: 'POST' });
+      setAuthUser(null);
+      setPage('dashboard');
+      setSession(null);
+      setResult(null);
+      setShowSetup(false);
+      setNotice('');
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!session) return undefined;
@@ -298,6 +393,13 @@ function App() {
     ? Math.round(history.reduce((total, item) => total + item.score, 0) / history.length)
     : null;
 
+  if (authChecking) {
+    return <div className="auth-loading" role="status"><span aria-hidden="true" /></div>;
+  }
+  if (!authUser) {
+    return <AuthScreen busy={authBusy} error={authError} onSubmit={handleAuthSubmit} onClearError={() => setAuthError('')} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -323,9 +425,8 @@ function App() {
             <button className="credits-button" onClick={() => setShowSetup(true)}>Start an interview <Icon name="arrow" size={15} /></button>
           </div>
           <div className="guest-profile">
-            <div className="avatar">G</div>
-            <div><strong>Guest candidate</strong><span>Local preview</span></div>
-            <span className="guest-dot" title="Local preview" />
+            <div className="avatar">{authUser.name.charAt(0).toUpperCase()}</div>
+            <div><strong>{authUser.name}</strong><span>{authUser.email}</span></div>
           </div>
         </div>
       </aside>
@@ -336,9 +437,9 @@ function App() {
             <header className="session-topbar">
               <button className="back-button" onClick={resetToDashboard}>← <span>Exit practice</span></button>
               <div className="session-role"><span className={`mode-dot ${session.mode.toLowerCase()}`} />{session.mode === 'AI' ? 'AI interview' : 'Practice preview'} <span>·</span> {session.role}</div>
-              <div className="timer"><Icon name="clock" size={16} /> {formatDuration(elapsed)}</div>
+              <div className="session-user-actions"><button type="button" className="logout-button" onClick={handleLogout} disabled={authBusy}>Sign out</button><div className="timer"><Icon name="clock" size={16} /> {formatDuration(elapsed)}</div></div>
             </header>
-            {notice && <div className="notice-banner"><Icon name="sparkle" size={18} /><span>{notice}</span></div>}
+            {(notice || authError) && <div className="notice-banner"><Icon name="sparkle" size={18} /><span>{notice || authError}</span></div>}
             <div className="session-layout">
               <section className="question-panel">
                 <div className="question-progress">
@@ -381,9 +482,9 @@ function App() {
           </section>
         ) : page === 'results' && result ? (
           <section className="results-page">
-            <div className="results-top"><button className="back-button" onClick={resetToDashboard}>← <span>Back to dashboard</span></button><button className="button button-outline" onClick={downloadReport}><Icon name="download" size={16} /> Download report</button></div>
+            <div className="results-top"><button className="back-button" onClick={resetToDashboard}>← <span>Back to dashboard</span></button><div className="results-actions"><button type="button" className="logout-button" onClick={handleLogout} disabled={authBusy}>Sign out</button><button className="button button-outline" onClick={downloadReport}><Icon name="download" size={16} /> Download report</button></div></div>
             <div className="results-heading"><div className="result-spark"><Icon name="sparkle" size={22} /></div><div><div className="eyebrow">PRACTICE COMPLETE · {result.mode.toUpperCase()}</div><h1>Your interview debrief</h1><p>{result.role} · {formatDuration(result.duration)} practice session</p></div></div>
-            {notice && <div className="notice-banner"><Icon name="sparkle" size={18} /><span>{notice}</span></div>}
+            {(notice || authError) && <div className="notice-banner"><Icon name="sparkle" size={18} /><span>{notice || authError}</span></div>}
             <div className="result-score-grid">
               <div className="score-card"><span>Overall score</span><strong>{result.overallScore}<small>/100</small></strong><div className="score-bar"><span style={{ width: `${result.overallScore}%` }} /></div><p>{result.mode === 'AI' ? 'AI-generated assessment' : 'Offline practice estimate'}</p></div>
               <div className="score-card"><span>Communication</span><strong>{result.communicationScore}<small>/100</small></strong><div className="score-bar green"><span style={{ width: `${result.communicationScore}%` }} /></div><p>Clarity and completeness</p></div>
@@ -400,7 +501,7 @@ function App() {
           <>
             <header className="topbar">
               <div className="breadcrumb"><span>Workspace</span><Icon name="chevron" size={14} /><strong>{navItems.find((item) => item.id === page)?.label || 'Dashboard'}</strong></div>
-              <div className="topbar-right"><span className="preview-pill"><span /> LOCAL PREVIEW</span><div className="avatar avatar-small">G</div></div>
+              <div className="topbar-right"><span className="preview-pill"><span /> SIGNED IN</span>{authError && <span className="auth-inline-error" role="alert">{authError}</span>}{notice && <span className="auth-inline-error" role="status">{notice}</span>}<div className="avatar avatar-small">{authUser.name.charAt(0).toUpperCase()}</div><button type="button" className="logout-button" onClick={handleLogout} disabled={authBusy}>Sign out</button></div>
             </header>
             {page === 'dashboard' && (
               <div className="dashboard-page">
@@ -431,7 +532,7 @@ function App() {
               <div className="listing-page"><div className="listing-heading"><div><p className="eyebrow">YOUR PRACTICE LIBRARY</p><h1>My interviews</h1><p>Review your completed practice sessions.</p></div><button className="button button-primary" onClick={() => setShowSetup(true)}><Icon name="plus" size={17} /> New interview</button></div>{history.length ? <div className="listing-card"><InterviewTable history={history} /></div> : <div className="listing-empty"><div className="empty-icon"><Icon name="briefcase" size={21} /></div><h2>No interviews yet</h2><p>Your completed sessions will appear here.</p><button className="button button-primary" onClick={() => setShowSetup(true)}>Start your first interview <Icon name="arrow" size={16} /></button></div>}</div>
             )}
             {page === 'progress' && (
-              <div className="listing-page"><div className="listing-heading"><div><p className="eyebrow">YOUR GROWTH</p><h1>My progress</h1><p>Small steps add up to confident interviews.</p></div></div><div className="progress-summary"><div className="progress-large"><span>Average practice score</span><strong>{averageScore === null ? '—' : `${averageScore}%`}</strong><p>{history.length ? `From ${history.length} completed ${history.length === 1 ? 'session' : 'sessions'}` : 'Complete a practice session to start tracking your progress.'}</p></div><div className="progress-large"><span>Total practice time</span><strong>{formatDuration(history.reduce((total, item) => total + item.duration, 0))}</strong><p>Time spent preparing in this browser.</p></div></div><div className="progress-note"><Icon name="sparkle" size={18} /><p>Progress is stored locally in this browser. Sign-in and cloud sync are not connected in this preview.</p></div></div>
+              <div className="listing-page"><div className="listing-heading"><div><p className="eyebrow">YOUR GROWTH</p><h1>My progress</h1><p>Small steps add up to confident interviews.</p></div></div><div className="progress-summary"><div className="progress-large"><span>Average practice score</span><strong>{averageScore === null ? '—' : `${averageScore}%`}</strong><p>{history.length ? `From ${history.length} completed ${history.length === 1 ? 'session' : 'sessions'}` : 'Complete a practice session to start tracking your progress.'}</p></div><div className="progress-large"><span>Total practice time</span><strong>{formatDuration(history.reduce((total, item) => total + item.duration, 0))}</strong><p>Time spent preparing in this browser.</p></div></div><div className="progress-note"><Icon name="sparkle" size={18} /><p>Your practice history is saved in this browser and kept separate for your account.</p></div></div>
             )}
           </>
         )}
