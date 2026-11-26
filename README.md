@@ -41,8 +41,9 @@ npm run dev
 ## Deploy to Vercel
 
 Import this repository into Vercel and keep the project root set to the repository
-root. `vercel.json` builds the React client into `client/dist` and deploys the
-Express API as a serverless function at `/api/*`.
+root. `vercel.json` defines a Vercel multi-service project: the Vite client serves
+the frontend at `/`, and the Express server serves the API at `/api/*` on the same
+domain.
 
 Configure these Vercel environment variables as needed:
 
@@ -51,8 +52,8 @@ Configure these Vercel environment variables as needed:
 - `CLIENT_URL` — optional comma-separated list of additional allowed browser origins
 - `MONGODB_URI` — optional MongoDB connection string when database-backed features are added
 
-The AI interview endpoints and health check are served from the same origin as
-the frontend. Do not add secrets to the repository or client-side environment.
+The frontend and API use the same origin, so no service binding is required. Do
+not add secrets to the repository or client-side environment.
 
 AI endpoints:
 
